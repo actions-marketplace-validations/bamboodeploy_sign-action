@@ -1,0 +1,111 @@
+name: 'Bamboo Deploy Sign'
+description: 'Sign a Windows binary (.exe / .msi) via the Bamboo Deploy API'
+author: 'Bamboo Deploy'
+branding:
+  icon: 'shield'
+  color: 'blue'
+
+inputs:
+  api-key:
+    description: 'Bamboo Deploy API key (starts with bd_live_). Store as a repo secret.'
+    required: true
+  file:
+    description: 'Path to the .exe or .msi to sign'
+    required: true
+  output:
+    description: 'Where to write the signed binary'
+    required: true
+  poll-interval:
+    description: 'Seconds between sign status polls'
+    required: false
+    default: '10'
+  poll-timeout:
+    description: 'Maximum seconds to wait for sign completion'
+    required: false
+    default: '900'
+  api-base:
+    description: 'API base URL (override only if self-hosting)'
+    required: false
+    default: 'https://api.bamboodeploy.com'
+
+outputs:
+  app-id:
+    description: 'The app id assigned by Bamboo Deploy'
+    value: ${{ steps.run.outputs.app-id }}
+  job-id:
+    description: 'The sign job id'
+    value: ${{ steps.run.outputs.job-id }}
+
+runs:
+  using: composite
+  steps:
+    - id: run
+      shell: bash
+      env:
+        BAMBOO_API_KEY: ${{ inputs.api-key }}
+        INPUT_FILE:     ${{ inputs.file }}
+        OUTPUT_FILE:    ${{ inputs.output }}
+        API_BASE:       ${{ inputs.api-base }}
+        POLL_INTERVAL:  ${{ inputs.poll-interval }}
+        POLL_TIMEOUT:   ${{ inputs.poll-timeout }}
+      run: |
+        set -euo pipefail
+
+        if [ -z "${BAMBOO_API_KEY:-}" ]; then
+          echo "::error::api-key input is empty"; exit 1
+        fi
+        case "$BAMBOO_API_KEY" in
+          bd_live_*) ;;
+          *) echo "::warning::api-key does not start with bd_live_; this is probably the wrong value" ;;
+        esac
+        if [ ! -f "$INPUT_FILE" ]; then
+          echo "::error::input file not found: $INPUT_FILE"; exit 1
+        fi
+        if ! command -v jq >/dev/null 2>&1; then
+          echo "::error::jq is required (preinstalled on github-hosted runners)"; exit 1
+        fi
+
+        AUTH="Authorization: Bearer $BAMBOO_API_KEY"
+        mkdir -p "$(dirname "$OUTPUT_FILE")"
+
+        echo "▸ Uploading $INPUT_FILE"
+        UP_JSON=$(curl -fsS -H "$AUTH" -F "file=@$INPUT_FILE" "$API_BASE/uploads")
+        APP_ID=$(printf '%s' "$UP_JSON" | jq -r .id)
+        if [ -z "$APP_ID" ] || [ "$APP_ID" = "null" ]; then
+          echo "::error::Upload failed: $UP_JSON"; exit 1
+        fi
+        echo "  app id: $APP_ID"
+        echo "app-id=$APP_ID" >> "$GITHUB_OUTPUT"
+
+        echo "▸ Queuing sign request"
+        SIGN_JSON=$(curl -fsS -X POST -H "$AUTH" "$API_BASE/uploads/$APP_ID/sign")
+        JOB_ID=$(printf '%s' "$SIGN_JSON" | jq -r '.job_id // empty')
+        if [ -z "$JOB_ID" ]; then
+          echo "::error::Sign request failed: $SIGN_JSON"; exit 1
+        fi
+        echo "  job id: $JOB_ID"
+        echo "job-id=$JOB_ID" >> "$GITHUB_OUTPUT"
+
+        DEADLINE=$(( $(date +%s) + POLL_TIMEOUT ))
+        STATE=""
+        echo "▸ Waiting for sign completion (timeout ${POLL_TIMEOUT}s)"
+        while [ "$(date +%s)" -lt "$DEADLINE" ]; do
+          STATUS_JSON=$(curl -fsS -H "$AUTH" "$API_BASE/uploads/$APP_ID")
+          STATE=$(printf '%s' "$STATUS_JSON" | jq -r '.sign.status // "unknown"')
+          echo "  $(date -u +%H:%M:%S) status: $STATE"
+          case "$STATE" in
+            done) break ;;
+            failed|denied)
+              REASON=$(printf '%s' "$STATUS_JSON" | jq -r '.sign.error // ""')
+              echo "::error::Sign $STATE${REASON:+: $REASON}"; exit 1 ;;
+          esac
+          sleep "$POLL_INTERVAL"
+        done
+        if [ "$STATE" != "done" ]; then
+          echo "::error::Sign did not complete within ${POLL_TIMEOUT}s (last state: $STATE)"; exit 1
+        fi
+
+        echo "▸ Downloading signed binary"
+        curl -fsS -H "$AUTH" -o "$OUTPUT_FILE" "$API_BASE/uploads/$APP_ID/download?variant=signed"
+        SIZE=$(wc -c < "$OUTPUT_FILE" | tr -d ' ')
+        echo "  wrote $OUTPUT_FILE ($SIZE bytes)"
