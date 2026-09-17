@@ -27,7 +27,7 @@ inputs:
   cli-version:
     description: 'Tag or branch of github.com/bamboodeploy/cli to run'
     required: false
-    default: 'v1.0.0'
+    default: 'v1.1.0'
   api-base:
     description: 'API base URL (override only if self-hosting)'
     required: false

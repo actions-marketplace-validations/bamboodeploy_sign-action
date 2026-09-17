@@ -27,7 +27,7 @@ Add `BAMBOO_API_KEY` as a repository secret (Settings → Secrets and variables 
 | `output` | no | input path | Where to write the signed binary |
 | `poll-interval` | no | `10` | Seconds between sign-status polls |
 | `poll-timeout` | no | `900` | Maximum seconds to wait |
-| `cli-version` | no | `v1.0.0` | Tag or branch of `bamboodeploy/cli` to run |
+| `cli-version` | no | `v1.1.0` | Tag or branch of `bamboodeploy/cli` to run |
 | `api-base` | no | `https://api.bamboodeploy.com` | API base URL |
 
 ## Outputs
