@@ -1,5 +1,5 @@
 name: 'Bamboo Deploy Sign'
-description: 'Scan and code-sign a Windows binary (.exe / .msi) via Bamboo Deploy. No certificate or HSM needed.'
+description: 'Scan and code-sign a Windows binary (.exe / .msi) via Bamboo Deploy.'
 author: 'Bamboo Deploy'
 branding:
   icon: 'shield'
