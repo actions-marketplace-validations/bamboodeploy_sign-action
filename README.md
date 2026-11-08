@@ -2,7 +2,7 @@
 
 Sign Windows binaries (.exe / .msi) from a GitHub Actions workflow via the [Bamboo Deploy](https://www.bamboodeploy.com) API.
 
-Wraps the upload → sign → poll → download flow into a single step.
+Uploads, signs, waits and downloads in a single step.
 
 ## Usage
 
@@ -16,32 +16,43 @@ Wraps the upload → sign → poll → download flow into a single step.
 
 The signed file replaces the input in place. Pass `output` to write it elsewhere.
 
-Add `BAMBOO_API_KEY` as a repository secret (Settings → Secrets and variables → Actions). Generate the key in the Bamboo Deploy dashboard under **API Keys**.
+Several files, one per line (wildcards allowed):
+
+```yaml
+- uses: bamboodeploy/sign-action@v2
+  with:
+    api-key: ${{ secrets.BAMBOO_API_KEY }}
+    files: |
+      ./dist/myapp.exe
+      ./dist/*.dll
+```
+
+Add `BAMBOO_API_KEY` as a repository secret (Settings, Secrets and variables, Actions). Generate the key in the Bamboo Deploy dashboard under **API Keys**.
 
 ## Inputs
 
 | Name | Required | Default | Description |
 |---|---|---|---|
 | `api-key` | yes | n/a | API key, starts with `bd_live_` |
-| `file` | yes | n/a | Path to the .exe or .msi to sign |
-| `output` | no | input path | Where to write the signed binary |
+| `file` | one of `file` or `files` | n/a | Path to the .exe or .msi to sign |
+| `files` | one of `file` or `files` | n/a | Several paths, one per line, wildcards allowed |
+| `output` | no | input path | Where to write the signed binary. With several files, a folder |
 | `poll-interval` | no | `10` | Seconds between sign-status polls |
 | `poll-timeout` | no | `900` | Maximum seconds to wait |
-| `cli-version` | no | `v1.1.0` | Tag or branch of `bamboodeploy/cli` to run |
+| `cli-version` | no | `v1.2.0` | Tag or branch of `bamboodeploy/cli` to run |
 | `api-base` | no | `https://api.bamboodeploy.com` | API base URL |
 
 ## Outputs
 
 | Name | Description |
 |---|---|
-| `app-id` | The app id assigned by Bamboo Deploy |
-| `job-id` | The sign job id |
+| `app-id` | The app id assigned by Bamboo Deploy (space separated for several files) |
+| `job-id` | The sign job id (space separated for several files) |
 
 ## Requirements
 
 - A Bamboo Deploy account with an active Premium subscription (signing requires Premium; uploads work on Free)
 - Node 18+ on the runner (preinstalled on all GitHub-hosted runners, Windows included). The action runs [bamboodeploy/cli](https://github.com/bamboodeploy/cli) via `npx`.
-- After your first reviewed build, ask Bamboo to enable **Auto-sign** on your account so clean builds sign in minutes instead of waiting for manual review.
 
 ## v1 to v2
 

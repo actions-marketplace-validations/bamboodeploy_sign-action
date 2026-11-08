@@ -1,5 +1,5 @@
 name: 'Bamboo Deploy Sign'
-description: 'Scan and code-sign a Windows binary (.exe / .msi) via Bamboo Deploy.'
+description: 'Scan and code-sign Windows binaries (.exe / .msi) via Bamboo Deploy.'
 author: 'Bamboo Deploy'
 branding:
   icon: 'shield'
@@ -11,9 +11,14 @@ inputs:
     required: true
   file:
     description: 'Path to the .exe or .msi to sign'
-    required: true
+    required: false
+    default: ''
+  files:
+    description: 'Several files to sign, one path per line. Wildcards such as dist/*.dll are allowed'
+    required: false
+    default: ''
   output:
-    description: 'Where to write the signed binary (default: replace the input file)'
+    description: 'Where to write the signed binary (default: replace the input file). With several files, a folder'
     required: false
     default: ''
   poll-interval:
@@ -27,7 +32,7 @@ inputs:
   cli-version:
     description: 'Tag or branch of github.com/bamboodeploy/cli to run'
     required: false
-    default: 'v1.1.0'
+    default: 'v1.2.0'
   api-base:
     description: 'API base URL (override only if self-hosting)'
     required: false
@@ -35,10 +40,10 @@ inputs:
 
 outputs:
   app-id:
-    description: 'The app id assigned by Bamboo Deploy'
+    description: 'The app id assigned by Bamboo Deploy (space separated when signing several files)'
     value: ${{ steps.run.outputs.app-id }}
   job-id:
-    description: 'The sign job id'
+    description: 'The sign job id (space separated when signing several files)'
     value: ${{ steps.run.outputs.job-id }}
 
 runs:
@@ -50,6 +55,7 @@ runs:
         BAMBOO_API_KEY: ${{ inputs.api-key }}
         BAMBOO_API_BASE: ${{ inputs.api-base }}
         INPUT_FILE: ${{ inputs.file }}
+        INPUT_FILES: ${{ inputs.files }}
         OUTPUT_FILE: ${{ inputs.output }}
         POLL_INTERVAL: ${{ inputs.poll-interval }}
         POLL_TIMEOUT: ${{ inputs.poll-timeout }}
@@ -57,11 +63,14 @@ runs:
       run: |
         set -euo pipefail
         if [ -z "${BAMBOO_API_KEY:-}" ]; then echo "::error::api-key input is empty"; exit 1; fi
-        if [ ! -f "$INPUT_FILE" ]; then echo "::error::input file not found: $INPUT_FILE"; exit 1; fi
+        FILES=()
+        if [ -n "$INPUT_FILE" ]; then FILES+=("$INPUT_FILE"); fi
+        while read -r line; do if [ -n "$line" ]; then FILES+=("$line"); fi; done <<< "$INPUT_FILES"
+        if [ ${#FILES[@]} -eq 0 ]; then echo "::error::set the file or files input"; exit 1; fi
         OUT_ARGS=()
         if [ -n "$OUTPUT_FILE" ]; then OUT_ARGS=(--out "$OUTPUT_FILE"); fi
         set +e
-        RESULT=$(npx -y "github:bamboodeploy/cli#${CLI_VERSION}" sign "$INPUT_FILE" ${OUT_ARGS[@]+"${OUT_ARGS[@]}"} \
+        RESULT=$(npx -y "github:bamboodeploy/cli#${CLI_VERSION}" sign "${FILES[@]}" ${OUT_ARGS[@]+"${OUT_ARGS[@]}"} \
           --timeout "$POLL_TIMEOUT" --interval "$POLL_INTERVAL" --json)
         CODE=$?
         set -e
@@ -71,9 +80,9 @@ runs:
           case "$CODE" in
             2) echo "::error::Signing requires a Premium subscription: https://www.bamboodeploy.com/dashboard/#billing" ;;
             3) echo "::error::Verify your publisher connections in the dashboard first: $MSG" ;;
-            4) echo "::error::Timed out: $MSG. If the job is in operator review, re-run after approval or ask Bamboo to enable Auto-sign on your account." ;;
+            4) echo "::error::Timed out: $MSG. If the job is in operator review, re-run after approval." ;;
             *) echo "::error::$MSG" ;;
           esac
           exit "$CODE"
         fi
-        printf '%s' "$RESULT" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const r=JSON.parse(s);console.log("app-id="+r.app_id);console.log("job-id="+r.job_id)})' >> "$GITHUB_OUTPUT"
+        printf '%s' "$RESULT" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const f=JSON.parse(s).files;console.log("app-id="+f.map(x=>x.app_id).join(" "));console.log("job-id="+f.map(x=>x.job_id).join(" "))})' >> "$GITHUB_OUTPUT"
